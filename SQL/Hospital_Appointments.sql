@@ -1,4 +1,4 @@
-﻿
+
 
 ---------------------------------------------------------------------- MEDICAL APPOINTMENT NO-SHOW ANALYSIS
 
@@ -31,29 +31,19 @@ SELECT TOP 0 * FROM [dbo].[MedicalAppointments_Raw];
 EXEC sp_help '[dbo].[MedicalAppointments_Raw]';
 
 
-
+-- Check for duplicate appointment IDs
 SELECT
-PatientId,
-COUNT(*) AS DuplicateCount
-FROM [dbo].[MedicalAppointments_Raw]
-GROUP BY PatientId
+    AppointmentID,
+    COUNT(*) AS DuplicateCount
+FROM dbo.MedicalAppointments_Raw
+GROUP BY AppointmentID
 HAVING COUNT(*) > 1;
-
-SELECT SUM(DuplicateCount - 1) AS TotalDuplicateRows
-FROM (
-    SELECT COUNT(*) AS DuplicateCount
-    FROM [dbo].[MedicalAppointments_Raw]
-    GROUP BY [PatientId]
-    HAVING COUNT(*) > 1
-) AS Duplicates;
-
-
 -- 1. PREPARE THE COLUMNS WE NEED
 
 
 
 
---DROP TABLE IF EXISTS #Prepared;
+DROP TABLE IF EXISTS #Prepared;
 
 
 
@@ -166,9 +156,13 @@ GO
 CREATE OR ALTER VIEW dbo.vw_AppointmentAnalysis AS
 SELECT *,
     FORMAT(AppointmentDate, 'dddd', 'en-US') AS AppointmentWeekday,
-    CASE WHEN Age <= 17 THEN '0-17' WHEN Age <= 34 THEN '18-34'
-         WHEN Age <= 49 THEN '35-49' WHEN Age <= 64 THEN '50-64'
-         ELSE '65+' END AS AgeGroup,
+    CASE
+		  WHEN Age IS NULL THEN 'Unknown'
+	      WHEN Age <= 17 THEN '0-17'
+		  WHEN Age <= 34 THEN '18-34'
+		  WHEN Age <= 49 THEN '35-49'
+		  WHEN Age <= 64 THEN '50-64'
+          ELSE '65+' END AS AgeGroup,
     CASE WHEN LeadTimeDays = 0 THEN 'Same day'
          WHEN LeadTimeDays <= 7 THEN '1-7 days' WHEN LeadTimeDays <= 14 THEN '8-14 days'
          WHEN LeadTimeDays <= 30 THEN '15-30 days' WHEN LeadTimeDays <= 60 THEN '31-60 days'
@@ -189,13 +183,20 @@ FROM dbo.vw_AppointmentAnalysis;
 
 -- 6. DOES NO-SHOW RATE DIFFER BY BOOKING LEAD TIME?
 
-SELECT LeadTimeBand, COUNT(*) AS Appointments,
-       SUM(CAST(NoShowFlag AS INT)) AS NoShows,
-       CAST(100.0 * SUM(CAST(NoShowFlag AS INT)) / COUNT(*) AS DECIMAL(9,2)) AS NoShowRate
+-- 6. DOES NO-SHOW RATE DIFFER BY BOOKING LEAD TIME?
+
+SELECT
+    LeadTimeBand,
+    COUNT(*) AS Appointments,
+    SUM(CAST(NoShowFlag AS INT)) AS NoShows,
+    CAST(
+        1.0 * SUM(CAST(NoShowFlag AS INT))
+        / NULLIF(COUNT(*), 0)
+        AS DECIMAL(9,6)
+    ) AS NoShowRate
 FROM dbo.vw_AppointmentAnalysis
 GROUP BY LeadTimeBand
 ORDER BY MIN(LeadTimeDays);
-
 
 
 -- 7. WHICH AGE GROUPS HAVE HIGHER NO-SHOW RATES?
